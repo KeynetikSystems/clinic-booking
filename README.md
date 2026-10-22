@@ -2,7 +2,7 @@
 
 REST API for a small clinic (5 doctors, 30-minute slots) built with **FastAPI + PostgreSQL + SQLAlchemy**, tested with **pytest**, deployed on **Render** via **GitHub Actions**.
 
-- **Live URL:** _TODO: https://your-app.onrender.com_ (interactive docs at `/docs`)
+- **Live URL:** [https://clinic-booking-6aqh.onrender.com] (interactive docs at `/docs`)
 - **Deploy branch:** `main`
 
 ---

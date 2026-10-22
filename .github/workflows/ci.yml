@@ -1,0 +1,35 @@
+name: CI/CD
+
+on:
+  pull_request:
+  push:
+    branches:
+      - main
+
+jobs:
+  test:
+    name: Run tests
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+      - run: pip install -r requirements.txt
+      - run: pytest -v
+
+  deploy:
+    name: Deploy to Render
+    # Only after tests pass, and only for a merge/push to main (never for PRs).
+    needs: test
+    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+    runs-on: ubuntu-latest
+    steps:
+      - name: Trigger Render deploy hook
+        run: curl --fail --silent --show-error -X POST "${{ secrets.RENDER_DEPLOY_HOOK_URL }}"
+
+      - name: Smoke test the live app
+        run: |
+          curl --fail --silent --show-error --retry 12 --retry-delay 15 --retry-all-errors \
+            "${{ secrets.APP_URL }}/"

@@ -1,0 +1,248 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Clinic Booking</title>
+<style>
+:root{--bg:#f4f7f6;--card:#fff;--text:#14201d;--muted:#5d6f6a;--line:#dbe5e2;--accent:#0d7a6b;--accent-t:#fff;--soft:#e3f3f0;--danger:#b3261e;}
+@media (prefers-color-scheme:dark){:root{--bg:#0f1715;--card:#17211f;--text:#e8f1ee;--muted:#9bb0aa;--line:#2a3a37;--accent:#3cc4af;--accent-t:#06231e;--soft:#1d3531;--danger:#ff8a80;}}
+*{box-sizing:border-box}
+body{margin:0;font-family:system-ui,-apple-system,Segoe UI,Roboto,sans-serif;background:var(--bg);color:var(--text);line-height:1.45}
+header{padding:1.2rem 1rem;text-align:center}
+header h1{margin:0;font-size:1.5rem}
+header p{margin:.2rem 0 0;color:var(--muted)}
+main{max-width:1000px;margin:0 auto;padding:0 1rem 3rem;display:grid;gap:1rem;grid-template-columns:1.4fr 1fr;align-items:start}
+@media (max-width:800px){main{grid-template-columns:1fr}}
+.card{background:var(--card);border:1px solid var(--line);border-radius:14px;padding:1.1rem}
+.card h2{margin:0 0 .8rem;font-size:1.05rem}
+label{display:block;font-size:.85rem;color:var(--muted);margin:.6rem 0 .25rem}
+input,textarea{width:100%;padding:.6rem .7rem;border:1px solid var(--line);border-radius:9px;background:var(--bg);color:var(--text);font:inherit}
+button{font:inherit;cursor:pointer;border-radius:9px;border:1px solid var(--line);background:var(--card);color:var(--text);padding:.5rem .8rem}
+button.primary{background:var(--accent);color:var(--accent-t);border-color:var(--accent);font-weight:600}
+button.danger{color:var(--danger)}
+button:focus-visible,input:focus-visible,textarea:focus-visible{outline:2px solid var(--accent);outline-offset:2px}
+.doctors{display:flex;flex-wrap:wrap;gap:.5rem}
+.doc{text-align:left;padding:.6rem .8rem}
+.doc small{display:block;color:var(--muted)}
+.doc.on{background:var(--soft);border-color:var(--accent)}
+.slots{display:grid;grid-template-columns:repeat(auto-fill,minmax(84px,1fr));gap:.5rem;margin-top:.4rem}
+.slots button{padding:.55rem 0;font-variant-numeric:tabular-nums}
+.slots button:disabled{opacity:.5;cursor:not-allowed;background:var(--bg);font-size:.85rem}
+.slots button small{display:block;font-size:.7rem;color:var(--muted)}
+.slots button.mine:disabled{opacity:1;border-color:var(--accent);background:var(--soft)}
+.slots button:not(:disabled):hover{background:var(--soft);border-color:var(--accent)}
+.muted{color:var(--muted)}
+.banner{background:var(--soft);border:1px solid var(--accent);border-radius:9px;padding:.6rem .8rem;margin-bottom:.8rem;display:flex;justify-content:space-between;gap:.5rem;align-items:center}
+.appt{border:1px solid var(--line);border-radius:10px;padding:.7rem;margin-top:.6rem}
+.appt.active{border-color:var(--accent);background:var(--soft)}
+.appt b{display:block}
+.row{display:flex;gap:.5rem;margin-top:.5rem;flex-wrap:wrap}
+#toast{position:fixed;left:50%;bottom:1.2rem;transform:translateX(-50%);background:var(--text);color:var(--bg);padding:.7rem 1rem;border-radius:10px;max-width:90vw;opacity:0;pointer-events:none;transition:opacity .2s}
+#toast.show{opacity:1}
+#toast.err{background:var(--danger);color:#fff}
+dialog{border:1px solid var(--line);border-radius:14px;background:var(--card);color:var(--text);max-width:420px;width:92vw}
+dialog::backdrop{background:rgba(0,0,0,.45)}
+</style>
+</head>
+<body>
+<header>
+  <h1>Clinic Booking</h1>
+  <p>Pick a doctor, choose a free 30-minute slot, book it.</p>
+</header>
+
+<main>
+  <section class="card" aria-labelledby="bk">
+    <h2 id="bk">Book an appointment</h2>
+    <div id="banner"></div>
+    <div id="doctors" class="doctors" role="group" aria-label="Doctors"></div>
+    <label for="date">Date</label>
+    <div class="row" style="margin-top:0">
+      <button id="prev" aria-label="Previous day">&lsaquo;</button>
+      <input type="date" id="date" style="flex:1;width:auto">
+      <button id="next" aria-label="Next day">&rsaquo;</button>
+      <button id="todayb">Today</button>
+    </div>
+    <label>Time slots</label>
+    <div id="slots" class="slots" aria-live="polite"></div>
+    <p class="muted" style="font-size:.8rem;margin:.6rem 0 0">Greyed slots can't be booked: <b>Booked</b> by someone, <b>Yours</b> (your own booking), or <b>Too soon</b> (less than 1 hour away).</p>
+  </section>
+
+  <div>
+    <section class="card" id="me" aria-labelledby="mh"></section>
+    <section class="card" id="mine" style="margin-top:1rem" hidden aria-labelledby="ah">
+      <h2 id="ah">My upcoming appointments</h2>
+      <div id="list"></div>
+    </section>
+  </div>
+</main>
+
+<dialog id="cd">
+  <form method="dialog">
+    <h2 style="margin-top:0">Cancel appointment</h2>
+    <label for="reason">Reason (required)</label>
+    <textarea id="reason" rows="3" maxlength="500" required></textarea>
+    <div class="row" style="justify-content:flex-end">
+      <button value="back" formnovalidate>Keep it</button>
+      <button class="danger" value="ok">Cancel appointment</button>
+    </div>
+  </form>
+</dialog>
+<div id="toast" role="status"></div>
+
+<script>
+const $ = s => document.querySelector(s);
+const esc = s => String(s).replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
+const pad = n => String(n).padStart(2, '0');
+const today = () => { const d = new Date(); return `${d.getFullYear()}-${pad(d.getMonth()+1)}-${pad(d.getDate())}`; };
+const hhmm = t => t.slice(11, 16);
+const nice = t => {                       // "2026-12-12T09:00:00" -> "Sat 12 Dec, 09:00" (no timezone maths)
+  const [y, m, d] = t.slice(0, 10).split('-').map(Number);
+  return new Date(y, m-1, d).toLocaleDateString('en-GB', {weekday:'short', day:'numeric', month:'short'}) + ', ' + hhmm(t);
+};
+
+let doctors = [], doctorId = null, resched = null, myAppts = [], day = {slots: [], unavailable: []};
+let patient = JSON.parse(localStorage.getItem('clinic_patient') || 'null');
+
+async function api(path, opts = {}) {
+  const r = await fetch(path, {headers: {'Content-Type': 'application/json'}, ...opts});
+  let body = null; try { body = await r.json(); } catch {}
+  if (!r.ok) {
+    const d = body && body.detail;
+    throw new Error(Array.isArray(d) ? d.map(e => e.msg.replace(/^Value error, /, '')).join('; ') : d || 'Something went wrong');
+  }
+  return body;
+}
+let tt;
+function toast(msg, err) {
+  const t = $('#toast'); t.textContent = msg; t.className = 'show' + (err ? ' err' : '');
+  clearTimeout(tt); tt = setTimeout(() => t.className = '', 3800);
+}
+const docName = id => (doctors.find(d => d.id === id) || {}).name || `Doctor ${id}`;
+
+/* ---- patient ---- */
+function renderMe() {
+  const el = $('#me');
+  if (patient) {
+    el.innerHTML = `<h2 id="mh">Hello, ${esc(patient.name)}</h2>
+      <button id="out">Not you? Switch patient</button>`;
+    $('#out').onclick = () => { localStorage.removeItem('clinic_patient'); patient = null; resched = null; renderAll(); };
+  } else {
+    el.innerHTML = `<h2 id="mh">Your details</h2>
+      <p class="muted" style="margin:0">Needed once, to book appointments.</p>
+      <label for="pn">Name</label><input id="pn" autocomplete="name">
+      <label for="pe">Email</label><input id="pe" type="email" autocomplete="email">
+      <div class="row"><button class="primary" id="go">Continue</button></div>`;
+    $('#go').onclick = async () => {
+      try {
+        const p = await api('/patients', {method: 'POST', body: JSON.stringify({name: $('#pn').value.trim(), email: $('#pe').value.trim()})});
+        patient = {id: p.id, name: p.name};
+        localStorage.setItem('clinic_patient', JSON.stringify(patient));
+        renderAll();
+      } catch (e) { toast(e.message, true); }
+    };
+  }
+}
+
+/* ---- doctors / slots ---- */
+function renderDoctors() {
+  $('#doctors').innerHTML = doctors.map(d =>
+    `<button class="doc ${d.id === doctorId ? 'on' : ''}" data-id="${d.id}" aria-pressed="${d.id === doctorId}">
+      ${esc(d.name)}<small>${d.start_time.slice(0,5)}–${d.end_time.slice(0,5)}</small></button>`).join('');
+  document.querySelectorAll('.doc').forEach(b => b.onclick = () => { doctorId = +b.dataset.id; renderDoctors(); loadSlots(); });
+}
+function shiftDay(n) {
+  const [y, m, d] = $('#date').value.split('-').map(Number);
+  const dt = new Date(y, m - 1, d + n);
+  const v = `${dt.getFullYear()}-${pad(dt.getMonth() + 1)}-${pad(dt.getDate())}`;
+  if (v < today()) return;
+  $('#date').value = v; loadSlots();
+}
+function renderSlots() {
+  const box = $('#slots');
+  const mine = new Set(myAppts.filter(a => a.doctor_id === doctorId).map(a => a.appointment_time));
+  const all = [...day.slots.map(t => ({t, free: true})), ...day.unavailable.map(u => ({t: u.time, reason: u.reason}))]
+    .sort((a, b) => a.t < b.t ? -1 : 1);
+  if (!all.length) { box.innerHTML = '<span class="muted">This doctor does not work on this day.</span>'; return; }
+  box.innerHTML = all.map(x => {
+    if (x.free) return `<button data-t="${x.t}">${hhmm(x.t)}</button>`;
+    const you = mine.has(x.t), label = you ? 'Yours' : x.reason === 'booked' ? 'Booked' : 'Too soon';
+    return `<button disabled class="${you ? 'mine' : ''}" title="${label}">${hhmm(x.t)}<small>${label}</small></button>`;
+  }).join('') + (day.slots.length ? '' : '<span class="muted" style="grid-column:1/-1">No free slots left on this day.</span>');
+  box.querySelectorAll('button:not(:disabled)').forEach(b => b.onclick = () => pick(b.dataset.t));
+}
+async function loadSlots() {
+  $('#prev').disabled = $('#date').value <= today();
+  if (!doctorId || !$('#date').value) { day = {slots: [], unavailable: []}; $('#slots').innerHTML = ''; return; }
+  try {
+    day = await api(`/doctors/${doctorId}/availability?date=${$('#date').value}`);
+    renderSlots();
+  } catch (e) { $('#slots').innerHTML = ''; toast(e.message, true); }
+}
+async function pick(t) {
+  try {
+    if (resched) {
+      if (!confirm(`Move your appointment to ${nice(t)}?`)) return;
+      await api(`/appointments/${resched.id}/reschedule`, {method: 'PATCH', body: JSON.stringify({new_time: t})});
+      resched = null; toast('Appointment rescheduled');
+    } else {
+      if (!patient) { toast('Enter your details first', true); const n = $('#pn'); if (n) n.focus(); return; }
+      if (!confirm(`Book ${docName(doctorId)} on ${nice(t)}?`)) return;
+      await api('/appointments', {method: 'POST', body: JSON.stringify({doctor_id: doctorId, patient_id: patient.id, appointment_time: t})});
+      toast('Appointment booked');
+    }
+    renderAll();
+  } catch (e) { toast(e.message, true); loadSlots(); }
+}
+
+/* ---- my appointments ---- */
+async function loadMine() {
+  $('#mine').hidden = !patient;
+  if (!patient) { myAppts = []; renderSlots(); return; }
+  try {
+    const list = await api(`/patients/${patient.id}/appointments`);
+    myAppts = list; renderSlots();
+    $('#list').innerHTML = list.length ? list.map(a => `
+      <div class="appt ${resched && resched.id === a.id ? 'active' : ''}">
+        <b>${esc(docName(a.doctor_id))}</b>${nice(a.appointment_time)}
+        <div class="row">
+          <button data-r="${a.id}" data-d="${a.doctor_id}" data-t="${a.appointment_time}">${resched && resched.id === a.id ? 'Stop moving' : 'Reschedule'}</button>
+          <button class="danger" data-c="${a.id}">Cancel</button>
+        </div></div>`).join('') : '<p class="muted">Nothing booked yet.</p>';
+    document.querySelectorAll('[data-r]').forEach(b => b.onclick = () => {
+      resched = resched && resched.id === +b.dataset.r ? null : {id: +b.dataset.r, doctor: +b.dataset.d};
+      if (resched) { doctorId = resched.doctor; $('#date').value = b.dataset.t.slice(0, 10); }
+      renderAll();
+    });
+    document.querySelectorAll('[data-c]').forEach(b => b.onclick = () => askCancel(+b.dataset.c));
+  } catch (e) { toast(e.message, true); }
+}
+function askCancel(id) {
+  const dlg = $('#cd'); $('#reason').value = ''; dlg.returnValue = ''; dlg.showModal();
+  dlg.onclose = async () => {
+    if (dlg.returnValue !== 'ok') return;
+    try {
+      await api(`/appointments/${id}/cancel`, {method: 'PATCH', body: JSON.stringify({cancel_reason: $('#reason').value.trim()})});
+      toast('Appointment cancelled'); if (resched && resched.id === id) resched = null; renderAll();
+    } catch (e) { toast(e.message, true); }
+  };
+}
+
+function renderBanner() {
+  $('#banner').innerHTML = resched
+    ? `<div class="banner"><span>Choose a new time for your ${esc(docName(resched.doctor))} appointment.</span><button id="stop">Stop</button></div>` : '';
+  if (resched) $('#stop').onclick = () => { resched = null; renderAll(); };
+}
+function renderAll() { renderMe(); renderBanner(); renderDoctors(); loadSlots(); loadMine(); }
+
+(async function init() {
+  const d = $('#date'); d.value = d.min = today(); d.onchange = loadSlots;
+  $('#prev').onclick = () => shiftDay(-1); $('#next').onclick = () => shiftDay(1);
+  $('#todayb').onclick = () => { d.value = today(); loadSlots(); };
+  try { doctors = await api('/doctors'); doctorId = doctors.length ? doctors[0].id : null; }
+  catch (e) { toast(e.message, true); }
+  renderAll();
+})();
+</script>
+</body>
+</html>

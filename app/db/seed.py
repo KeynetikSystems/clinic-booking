@@ -7,11 +7,11 @@ from sqlalchemy.orm import Session
 from app.db.models import Doctor
 
 DOCTORS = [
-    ("Dr. Achieng Otieno", time(8, 0), time(16, 0)),
-    ("Dr. Brian Kamau", time(9, 30), time(17,30)),
-    ("Dr. Carol Kemunto", time(12, 0), time(21, 0)),
+    ("Dr. Shadrack Otieno", time(8, 0), time(16, 0)),
+    ("Dr. Brian Ngotho", time(9, 30), time(17,30)),
+    ("Dr. Carol Rose", time(12, 0), time(21, 0)),
     ("Dr. Fatuma Hassan", time(8, 30), time(14, 30)),
-    ("Dr. Peter Mwangi", time(10, 0), time(18, 0)),
+    ("Dr. Peter Lumumba", time(10, 0), time(18, 0)),
 ]
 
 

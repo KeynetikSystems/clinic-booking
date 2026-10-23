@@ -162,7 +162,7 @@ Render's own auto-deploy is switched **off**, so a deploy can only happen throug
 ### 1. What did you use AI for across the four sections?
 
 - **Section 1 (design):** drafting the data models.
-- **Section 2 (API):** [service layer / endpoints, if true], and the tests.
+- **Section 2 (API):** service layer and the tests.
 - **Section 3 (deployment):** the GitHub Actions workflow.
 - **Front end:** the booking page, which I then reviewed and refined.
 

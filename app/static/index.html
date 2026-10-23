@@ -31,6 +31,8 @@ button:focus-visible,input:focus-visible,textarea:focus-visible{outline:2px soli
 .slots button:disabled{opacity:.5;cursor:not-allowed;background:var(--bg);font-size:.85rem}
 .slots button small{display:block;font-size:.7rem;color:var(--muted)}
 .slots button.mine:disabled{opacity:1;border-color:var(--accent);background:var(--soft)}
+.hint{grid-column:1/-1;display:flex;flex-wrap:wrap;align-items:center;gap:.5rem .7rem;padding:.7rem .85rem;border:1px solid var(--accent);background:var(--soft);border-radius:10px;font-size:.9rem}
+.hint button{margin-left:auto}
 .slots button:not(:disabled):hover{background:var(--soft);border-color:var(--accent)}
 .muted{color:var(--muted)}
 .banner{background:var(--soft);border:1px solid var(--accent);border-radius:9px;padding:.6rem .8rem;margin-bottom:.8rem;display:flex;justify-content:space-between;gap:.5rem;align-items:center}
@@ -158,6 +160,16 @@ function shiftDay(n) {
   if (v < today()) return;
   $('#date').value = v; loadSlots();
 }
+function noSlotsHint() {
+  const isToday = $('#date').value === today();
+  return `<div class="hint" role="status">
+    <span aria-hidden="true">💡</span>
+    <span>${isToday
+      ? 'No free slots left today. Try tomorrow, or pick another doctor.'
+      : 'No free slots left on this day. Try another day or another doctor.'}</span>
+    ${isToday ? '<button id="nextDay" class="primary">View tomorrow</button>' : ''}
+  </div>`;
+}
 function renderSlots() {
   const box = $('#slots');
   const mine = new Set(myAppts.filter(a => a.doctor_id === doctorId).map(a => a.appointment_time));
@@ -167,9 +179,12 @@ function renderSlots() {
   box.innerHTML = all.map(x => {
     if (x.free) return `<button data-t="${x.t}">${hhmm(x.t)}</button>`;
     const you = mine.has(x.t), label = you ? 'Yours' : x.reason === 'booked' ? 'Booked' : 'Too soon';
-    return `<button disabled class="${you ? 'mine' : ''}" title="${label}">${hhmm(x.t)}<small>${label}</small></button>`;
-  }).join('') + (day.slots.length ? '' : '<span class="muted" style="grid-column:1/-1">No free slots left on this day.</span>');
+    const tip = you ? 'Your appointment' : x.reason === 'booked' ? 'Already booked by someone else' : 'Bookings need at least 1 hour notice';
+    return `<button disabled class="${you ? 'mine' : ''}" title="${tip}">${hhmm(x.t)}<small>${label}</small></button>`;
+  }).join('') + (day.slots.length ? '' : noSlotsHint());
   box.querySelectorAll('button:not(:disabled)').forEach(b => b.onclick = () => pick(b.dataset.t));
+  const next = box.querySelector('#nextDay');
+  if (next) next.onclick = () => shiftDay(1);
 }
 async function loadSlots() {
   $('#prev').disabled = $('#date').value <= today();

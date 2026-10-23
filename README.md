@@ -1,9 +1,14 @@
 # Clinic Booking API
 
-REST API for a small clinic (5 doctors, 30-minute slots) built with **FastAPI + PostgreSQL + SQLAlchemy**, tested with **pytest**, deployed on **Render** via **GitHub Actions**.
+A REST API and small web page for booking doctor appointments at a clinic with 5 doctors and 30-minute slots. Built with **FastAPI, PostgreSQL and SQLAlchemy**, tested with **pytest**, and deployed on **Render** through **GitHub Actions**.
 
-- **Live URL:** [https://clinic-booking-6aqh.onrender.com] (interactive docs at `/docs`)
-- **Deploy branch:** `main`
+| | |
+|---|---|
+| **Live app** | https://clinic-booking-6aqh.onrender.com |
+| **API docs (Swagger)** | https://clinic-booking-6aqh.onrender.com/docs |
+| **Deploy branch** | `main` |
+
+> The app runs on a free Render plan. After a period of inactivity it sleeps, so the first request can take up to a minute while it wakes.
 
 ---
 
@@ -11,79 +16,61 @@ REST API for a small clinic (5 doctors, 30-minute slots) built with **FastAPI + 
 
 ### Components
 
-Requests flow top to bottom through four layers:
+Requests flow downward through four layers:
 
 ```
 HTTP request
    │
    ▼
-app/api/appointments.py            Routing, request/response shapes
-   │         └── app/schemas/appointment.py    Pydantic validation
+app/api/appointments.py          Routing, request/response shapes
+   │      └── app/schemas/appointment.py   Pydantic validation
    ▼
-app/services/booking_service.py    All business rules (no FastAPI imports)
+app/services/booking_service.py  All business rules (no FastAPI imports)
    │
    ▼
-app/db/models.py, database.py      SQLAlchemy / PostgreSQL
+app/db/models.py, database.py    SQLAlchemy models and the PostgreSQL connection
 ```
 
-> **Dependency rule:** dependencies point downward only (`api` → `services` → `db`). The service layer never imports from `api` or FastAPI, so it can be tested and reused without the web framework.
-
-
-| Layer | Path | Responsibility |
-|-------|------|----------------|
-| API | `app/api/appointments.py` | Routing, request/response shapes |
-| Schemas | `app/schemas/appointment.py` | Pydantic validation |
-| Services | `app/services/booking_service.py` | All business rules (no FastAPI imports) |
-| Database | `app/db/models.py`, `app/db/database.py` | SQLAlchemy models and PostgreSQL connection |
-
-Keeping rules in the service layer means they are unit-testable without HTTP, and a future change of
-transport (admin UI, queue worker, gRPC) reuses them unchanged.
+**Dependency rule:** dependencies point downward only (`api` → `services` → `db`). The service layer never imports FastAPI, so the rules can be tested without HTTP, and a future entry point (admin UI, queue worker, gRPC) can reuse them unchanged.
 
 ### Models
 
-| Model | Fields/Attributes |
+| Model | Fields |
 |---|---|
-| Doctor | `id, name, start_time, end_time` (daily working hours) |
-| Patient | `id, name, email` |
-| Appointment | `id, doctor_id, patient_id, appointment_time, status (booked/cancelled), cancel_reason` |
+| **Doctor** | `id, name, start_time, end_time` (daily working hours) |
+| **Patient** | `id, name, email` |
+| **Appointment** | `id, doctor_id, patient_id, appointment_time, status (booked / cancelled), cancel_reason` |
 
-Slots are **computed, not stored**: a doctor's free slots for a day are the 30-minute steps between
-`start_time` and `end_time`, minus that day's `booked` appointments. Nothing to pre-generate or keep in sync.
+Slots are **computed, not stored**. A doctor's free slots for a day are the 30-minute steps between `start_time` and `end_time`, minus that day's `booked` appointments. There is nothing to pre-generate or keep in sync.
 
 ### Key decisions
 
-1. **Double booking is prevented by the database, not just by code.** A partial unique index on
-   `(doctor_id, appointment_time) WHERE status = 'booked'`. The service checks first to return a friendly
-   409, but a check-then-insert alone races under concurrent requests; the index guarantees only one wins and the
-   loser gets a 409 too.
-2. **Cancel keeps the row** (`status=cancelled` + required reason) instead of deleting it. History is kept, and the partial
-   index ignores cancelled rows, so the slot is bookable again immediately.
-3. **Reschedule updates the same row.** Releasing the old slot and claiming the new one happen in one
-   transaction; if the new slot is invalid or taken, the original booking is untouched.
-4. **Business rules** (same for booking and rescheduling): inside the doctor's working hours, aligned to a
-   30-minute boundary, not in the past, and (bonus) at least 1 hour from now.
-5. **Time zone:** all times are clinic-local and timezone-naive (offsets are rejected with 422). "Now" is
-   computed in `CLINIC_TZ` (default `Africa/Nairobi`) rather than the server clock, because cloud hosts run in UTC and
-   would otherwise be 3 hours off.
-6. **Status codes:** `404` unknown doctor/patient/appointment, `409` slot taken or invalid state (already cancelled),
-   `422` invalid input (past, outside hours, off-grid, within 1 hour, missing cancel reason).
-7. **Seed data:** the 5 doctors are created on first start if the table is empty. Patients are created via `POST /patients`.
+1. **The database prevents double booking, not just the code.** A partial unique index on `(doctor_id, appointment_time) WHERE status = 'booked'` allows one active booking per doctor per slot. The service checks first so it can return a friendly `409`, but a check-then-insert alone can race under concurrent requests. With the index, only one request wins and the other also gets a `409`.
+2. **Cancel keeps the row** (`status = cancelled` plus a required reason) instead of deleting it. History is preserved, and because the index ignores cancelled rows, the slot can be booked again immediately.
+3. **Reschedule updates the same row.** The old slot is released and the new one claimed in a single transaction. If the new slot is invalid or taken, the original booking is untouched.
+4. **One set of rules for booking and rescheduling:** the time must be inside the doctor's working hours, on a 30-minute boundary, not in the past, and (bonus) at least 1 hour from now.
+5. **The 1-hour rule is interpreted as "at least 1 hour of notice".** The brief says to prevent bookings *within* 1 hour of now. I read that as a minimum lead time, so a slot exactly 60 minutes away is allowed and anything closer is rejected. The error message says "at least 1 hour in advance". The stricter reading is a one-character change (`<` to `<=`) in the service.
+6. **Time zone:** all times are clinic-local and timezone-naive (offsets are rejected with `422`). "Now" is computed in `CLINIC_TZ` (default `Africa/Nairobi`) rather than from the server clock, because cloud hosts run in UTC and would otherwise be 3 hours off.
+7. **Status codes:** `404` unknown doctor, patient or appointment; `409` slot taken or invalid state (for example, already cancelled); `422` invalid input (past, outside hours, off the 30-minute grid, within 1 hour, missing cancel reason).
+8. **Seed data:** the 5 doctors are created on first start if the table is empty. Patients are created through `POST /patients`.
 
 ### Trade-offs considered
 
-- **Stored slots vs computed slots:** stored slots make "who has slot X" a simple join, but require generating and
-  maintaining rows per doctor per day (and migrating them when hours change). Computed slots are simpler at this scale.
-- **Naive local time vs UTC storage:** right for one clinic; a multi-clinic/multi-timezone product should store UTC.
-- **`create_all` vs Alembic migrations:** `create_all` on startup is fine for a take-home; add Alembic once the schema starts changing.
-- **No auth:** out of scope. Patient identity is a plain `patient_id` today.
-- **Web UI:** a dependency-free single page (`app/static/index.html`) served by the API itself, so one deployment covers both. Patients "sign in" by registering name + email once (stored in the browser); there is no real authentication.
-- Unhandled-> one patient holding overlapping slots with different doctors; per-doctor days off/breaks; variable
-  appointment lengths.
+- **Stored vs computed slots:** stored slots make "who has slot X?" a simple join, but need rows generated per doctor per day, and migrated whenever hours change. Computed slots are simpler at this scale.
+- **Naive local time vs UTC storage:** naive local time suits a single clinic. A multi-clinic or multi-timezone product should store UTC.
+- **`create_all` vs Alembic migrations:** `create_all` on startup is fine for this scope. Alembic should be added once the schema starts changing.
+- **No authentication:** out of scope for this exercise. Patient identity is a plain `patient_id`.
+- **Web page:** a dependency-free single page (`app/static/index.html`) served by the API itself, so one deployment covers both. Patients "sign in" by registering a name and email once (remembered in the browser). This is convenience, not real authentication.
+- **Not handled:** a patient holding overlapping slots with different doctors, per-doctor days off and breaks, and variable appointment lengths.
 
-### Growing
+### Growing the system
 
-Per-weekday schedules and days off (a `DoctorSchedule`/`TimeOff` table), auth + roles, Alembic, email/SMS reminders via a
-background worker, appointment types with durations, multi-clinic support (and UTC storage), pagination on list endpoints.
+- **Per-weekday schedules and days off:** a `DoctorSchedule` and `TimeOff` table, read by the slot calculation.
+- **Authentication and roles:** take the patient identity from a token instead of the request body.
+- **Reminders:** a background worker sending email or SMS for upcoming appointments.
+- **Appointment types with durations:** needs an overlap rule (for example, a Postgres exclusion constraint on time ranges) in place of the single-slot index.
+- **Multiple clinics:** a clinic table, UTC storage with a time zone per clinic, and Alembic migrations.
+- **Pagination** on list endpoints.
 
 ---
 
@@ -91,30 +78,35 @@ background worker, appointment types with durations, multi-clinic support (and U
 
 | Method | Path | Notes |
 |---|---|---|
-| POST | `/appointments` | `{doctor_id, patient_id, appointment_time}` -> 201 |
-| GET | `/doctors/{id}/availability?date=YYYY-MM-DD` | free 30-min slots |
-| PATCH | `/appointments/{id}/cancel` | `{cancel_reason}` (required); 409 if already cancelled |
-| PATCH | `/appointments/{id}/reschedule` | `{new_time}`; 409 if cancelled |
-| GET | `/patients/{id}/appointments` | upcoming, booked only, sorted by date |
-| GET | `/doctors` | list doctors |
-| POST | `/doctors`, `/patients` | create records |
-| GET | `/` | web UI (book, reschedule, cancel); `/docs` = Swagger, `/health` = status |
+| `POST` | `/appointments` | Body `{doctor_id, patient_id, appointment_time}` → `201`; `409` if the slot is taken |
+| `GET` | `/doctors/{id}/availability?date=YYYY-MM-DD` | `slots` = free 30-minute slots; `unavailable` = booked or too-soon slots (lets the page grey them out) |
+| `PATCH` | `/appointments/{id}/cancel` | Body `{cancel_reason}` (required); `409` if already cancelled |
+| `PATCH` | `/appointments/{id}/reschedule` | Body `{new_time}`; `409` if the appointment is cancelled |
+| `GET` | `/patients/{id}/appointments` | Upcoming booked appointments, sorted by date |
+| `GET` | `/doctors` | List doctors |
+| `POST` | `/doctors`, `/patients` | Create records |
+| `GET` | `/` | Web page (book, reschedule, cancel) |
+| `GET` | `/docs`, `/health` | Swagger UI, health check |
+
+Times are clinic-local ISO strings without an offset, for example `2026-12-12T09:00:00`.
 
 ### Run locally
 
 ```bash
 python -m venv .venv
-source .venv/bin/activate          # Windows: .venv\Scripts\activate
+source .venv/bin/activate            # Windows: .venv\Scripts\activate
 pip install -r requirements.txt
 
+# PostgreSQL via Docker
 docker run --name clinic-db -e POSTGRES_USER=clinic -e POSTGRES_PASSWORD=clinic123 \
   -e POSTGRES_DB=clinicdb -p 5432:5432 -d postgres
 
-cp .env.example .env
-uvicorn app.main:app --reload       # UI: http://localhost:8000  |  API docs: /docs
+cp .env.example .env                 # Windows: copy .env.example .env
+uvicorn app.main:app --reload        # page: http://localhost:8000   docs: /docs
 ```
 
-Without `DATABASE_URL` the app falls back to a local SQLite file.
+- If `DATABASE_URL` is not set, the app falls back to a local SQLite file, so you can run it without Docker.
+- If port 8000 is unavailable (common on Windows), add `--port 8085`.
 
 ### Tests
 
@@ -122,47 +114,66 @@ Without `DATABASE_URL` the app falls back to a local SQLite file.
 pytest -v
 ```
 
-Run against in-memory SQLite with the clock controlled in tests. They cover double booking, cancel re-opening the slot,
-reschedule releasing the old slot, rescheduling onto a taken slot, cancelling twice, rescheduling a cancelled
-appointment, required cancel reason, working-hours/grid/past checks, the 1-hour rule, and the upcoming-appointments list.
+The tests run against in-memory SQLite, with the clock controlled by the test. They cover:
+
+- double booking and booking an already-taken slot;
+- cancelling, which reopens the slot, and rejecting a second cancel;
+- rescheduling, which releases the old slot, and rejecting a move onto a taken slot or of a cancelled appointment;
+- the required cancel reason;
+- working-hours, 30-minute-grid and past-time checks;
+- the 1-hour rule;
+- availability, including booked and too-soon slots;
+- the upcoming-appointments list.
+
+Production runs on PostgreSQL. The partial index uses syntax supported by both databases.
 
 ---
 
-## Section 3: Deployment & CI/CD
+## Section 3: Deployment and CI/CD
 
-- **Provider:** Render (Web Service + managed PostgreSQL).
+- **Provider:** Render (Web Service plus managed PostgreSQL).
+- **Public URL:** https://clinic-booking-6aqh.onrender.com
 - **Branch that deploys:** `main`.
-- **Pipeline** (`.github/workflows/ci.yml`):
-  1. **On every pull request** and every push to `main`: install dependencies and run `pytest`.
-  2. **On push/merge to `main`, only if tests pass:** call the Render deploy hook, then smoke-test the live URL (retrying while the new version starts).
-- Render's own auto-deploy is turned **off** so a deploy can only happen through this pipeline, after tests pass.
 
-Setup: create the Render Web Service (build `pip install -r requirements.txt`, start
-`uvicorn app.main:app --host 0.0.0.0 --port $PORT`), add a Render PostgreSQL and set `DATABASE_URL` to its Internal URL,
-set Auto-Deploy to Off, then add GitHub repo secrets `RENDER_DEPLOY_HOOK_URL` (Render -> Settings -> Deploy Hook) and `APP_URL`.
+### Pipeline (`.github/workflows/ci.yml`)
+
+1. **Every pull request, and every push to `main`:** install dependencies and run `pytest`.
+2. **Only on a push or merge to `main`, and only if the tests pass:** call the Render deploy hook, then smoke-test the live URL (retrying while the new version starts).
+
+Render's own auto-deploy is switched **off**, so a deploy can only happen through this pipeline, after the tests pass.
+
+### One-time setup
+
+1. Create a Render Web Service from the repo.
+   - Build command: `pip install -r requirements.txt`
+   - Start command: `uvicorn app.main:app --host 0.0.0.0 --port $PORT`
+2. Create a Render PostgreSQL database in the same region, and set the service's `DATABASE_URL` environment variable to its **Internal Database URL**.
+3. Set Auto-Deploy to **Off**.
+4. Add two GitHub repository secrets:
+   - `RENDER_DEPLOY_HOOK_URL`: from Render → Settings → Deploy Hook
+   - `APP_URL`: `https://clinic-booking-6aqh.onrender.com` (no trailing slash)
 
 ---
 
 ## Section 4: AI Reflection
 
-_Write this in your own words, honestly. Prompts from the assessment:_
+### 1. What did you use AI for across the four sections?
 
-1. **What did you use AI for across the four sections?**
-   - TODO
-2. **One example where an AI suggestion improved your work. What did you prompt it with?**
-   - TODO
+-Drafting the design and code, checking the code against the assessment PDF.
 
+### 2. One example where an AI suggestion improved your work. What did you prompt it with?
 
+> **TODO:** write this in your own words.
+<!-- Ideas, only if true: the partial unique index for double booking; computing "now" in the clinic's time zone instead of the server's. Include the prompt you actually used. -->
 
-3. **One example where AI output was wrong or incomplete, and how you caught it.**
+### 3. One example where AI output was wrong or incomplete, and how you caught it.
 
--The AI used native browser popups rather than a custom one. The native browser popup can be harder to notice or less believable for some users in my view.
+- The AI's first version of the booking page used the browser's built-in `confirm()` pop-up to confirm bookings and reschedules. It worked, but in my view a plain native pop-up is easy to overlook and looks less trustworthy to patients, which matters for something like a medical appointment.
+- The AI had listed this itself as a known limitation. I judged it worth fixing and asked for a styled in-page confirmation dialog, which now matches the cancel dialog.
 
+### 4. Two decisions you made without AI. Why did you trust your own judgment?
 
-   
-4. **Two decisions you made without AI, and why you trusted your own judgment.**
-
-   The decision to work on a html frontend.
-   The decision to mark occupied booking slots
-
-   - TODO
+- **I decided to build an HTML front end** served by the API itself, instead of leaving Swagger as the only interface.
+  - *Why I trusted my own judgment:* TODO (your reason, for example who the page is for)
+- **I chose to show occupied slots greyed out and labelled**, instead of hiding them from the list.
+  - *Why I trusted my own judgment:* The AI's first version listed only free slots. From a patient's point of view, a missing time looks like an error, while a greyed-out "Booked" slot clearly says it exists but is taken. I recognised that gap and asked for the visual cue.

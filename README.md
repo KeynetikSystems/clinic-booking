@@ -1,6 +1,8 @@
 # Clinic Booking API
 
-A REST API and small web page for booking doctor appointments at a clinic with 5 doctors and 30-minute slots. Built with **FastAPI, PostgreSQL and SQLAlchemy**, tested with **pytest**, and deployed on **Render** through **GitHub Actions**.
+A production-style clinic appointment scheduling system built with FastAPI, PostgreSQL, and SQLAlchemy.
+
+The application enables patients to book, reschedule, and cancel appointments while preventing double bookings through database-level constraints and transactional business logic. It includes automated tests, CI/CD deployment via GitHub Actions, interactive API documentation, and a lightweight web interface for non-technical users
 
 | | |
 |---|---|
@@ -159,21 +161,25 @@ Render's own auto-deploy is switched **off**, so a deploy can only happen throug
 
 ### 1. What did you use AI for across the four sections?
 
--Drafting the design and code, checking the code against the assessment PDF.
+- **Section 1 (design):** drafting the data models.
+- **Section 2 (API):** [service layer / endpoints, if true], and the tests.
+- **Section 3 (deployment):** the GitHub Actions workflow.
+- **Front end:** the booking page, which I then reviewed and refined.
 
 ### 2. One example where an AI suggestion improved your work. What did you prompt it with?
 
-> **TODO:** write this in your own words.
-<!-- Ideas, only if true: the partial unique index for double booking; computing "now" in the clinic's time zone instead of the server's. Include the prompt you actually used. -->
+>  Polishing the double booking prevention algorithm. I prompted it with "There is a risk of two patients booking one doctor in one slots resulting in a doctor being double book.How should we prevent double booking?"
 
 ### 3. One example where AI output was wrong or incomplete, and how you caught it.
 
-- The AI's first version of the booking page used the browser's built-in `confirm()` pop-up to confirm bookings and reschedules. It worked, but in my view a plain native pop-up is easy to overlook and looks less trustworthy to patients, which matters for something like a medical appointment.
-- The AI had listed this itself as a known limitation. I judged it worth fixing and asked for a styled in-page confirmation dialog, which now matches the cancel dialog.
+- **What was incomplete:** The AI-generated UI initially displayed only available appointment slots. During manual testing, I found that this created ambiguity because users could not distinguish between unavailable slots and missing data.
+- **How I caught it:** by using the page as a patient would. A time that vanishes looks like an error, whereas a greyed-out slot labelled "Booked" or "Too soon" clearly says the slot exists but cannot be taken.
+- **What I did:** I asked for the occupied slots to be shown greyed out with labels, and to mark the patient's own booking as "Yours".
+- A smaller fix: the first version also used the browser's built-in `confirm()` pop-up for bookings and reschedules. I judged it easy to overlook and less trustworthy for a medical appointment, so I had it replaced with a styled in-page confirmation dialog matching the cancel dialog.
 
 ### 4. Two decisions you made without AI. Why did you trust your own judgment?
 
 - **I decided to build an HTML front end** served by the API itself, instead of leaving Swagger as the only interface.
-  - *Why I trusted my own judgment:* TODO (your reason, for example who the page is for)
+  - *Why I trusted my own judgment:* Swagger is not intended for everyday patients. I therefore chose to provide a dedicated web interface that abstracts the underlying API and presents appointment information in a more accessible way.
 - **I chose to show occupied slots greyed out and labelled**, instead of hiding them from the list.
-  - *Why I trusted my own judgment:* The AI's first version listed only free slots. From a patient's point of view, a missing time looks like an error, while a greyed-out "Booked" slot clearly says it exists but is taken. I recognised that gap and asked for the visual cue.
+  - *Why I trusted my own judgment:* The AI's first version listed only free slots. From a patient's point of view, a missing time looks like an error, while a greyed-out "Booked" slot clearly says it exists but is taken. I recognised that gap and prompted the AI to build a visual cue to close the gap.
